@@ -177,7 +177,7 @@ android {
             resValue("mipmap", "floris_app_icon", "@mipmap/ic_humming")
             resValue("mipmap", "floris_app_icon_round", "@mipmap/ic_humming")
             resValue("drawable", "floris_app_icon_foreground", "@drawable/ic_humming_foreground")
-            resValue("string", "floris_app_name", "Humming")
+            resValue("string", "floris_app_name", "Humming Test")
         }
 
         named("release") {

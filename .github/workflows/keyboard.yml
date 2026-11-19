@@ -46,6 +46,15 @@ jobs:
           { echo "### Unit-test line coverage"; cat coverage/coverage.md; } >> "$GITHUB_STEP_SUMMARY"
       - name: sha256
         run: cd keyboard/app/build/outputs/apk/debug && sha256sum *.apk | tee apk-sha256.txt
+      - name: Verify test APK identity and signature
+        run: |
+          set -euo pipefail
+          APK=$(find keyboard/app/build/outputs/apk/debug -name '*.apk' -print -quit)
+          TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          "$TOOLS/aapt" dump badging "$APK" | tee keyboard/app/build/outputs/apk/debug/apk-info.txt
+          grep -q "package: name='com.humming.keyboard.debug'" keyboard/app/build/outputs/apk/debug/apk-info.txt
+          "$TOOLS/apksigner" verify --verbose --print-certs "$APK" \
+            | tee keyboard/app/build/outputs/apk/debug/apk-signature.txt
       - uses: actions/upload-artifact@v7
         if: always()
         with:
