@@ -172,8 +172,17 @@ class StreamingSession(
                 else -> VoiceCommands.apply(cleanText(raw))
             }
             val ms = (System.nanoTime() - t0) / 1_000_000
-            return Result(cmd.text, raw, segmenter.segmentsEmitted, ms, if (cmd.text.isBlank()) error else null,
-                if (tail) lastAudioMs else 0, if (tail) lastSttMs else 0, if (tail) lastTiming else "{}", cmd.instruction)
+            return Result(
+                cmd.text,
+                raw,
+                segmenter.segmentsEmitted,
+                ms,
+                if (cmd.text.isBlank()) error else null,
+                if (tail) lastAudioMs else 0,
+                if (tail) lastSttMs else 0,
+                if (tail) lastTiming else "{}",
+                cmd.instruction,
+            )
         } finally {
             worker.shutdown()
             afterWorkerTermination(worker) { releaseEngine() }
@@ -211,7 +220,11 @@ internal fun afterWorkerTermination(worker: ExecutorService, action: () -> Unit)
                 interrupted = true
             }
         }
-        try { action() } finally { if (interrupted) Thread.currentThread().interrupt() }
+        try {
+            action()
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
+        }
     }, "humming-stt-release").apply { isDaemon = true }.start()
 }
 

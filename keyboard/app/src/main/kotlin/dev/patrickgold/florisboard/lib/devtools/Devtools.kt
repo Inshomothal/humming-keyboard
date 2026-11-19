@@ -38,13 +38,19 @@ import java.util.concurrent.TimeoutException
 
 @Suppress("MemberVisibilityCanBePrivate")
 object Devtools {
-    fun generateDebugLog(context: Context, prefs: FlorisPreferenceModel? = null, includeLogcat: Boolean = false): String {
-        return buildString {
-            append(generateDebugLogHeader(context, prefs))
-            if (includeLogcat) {
-                appendLine()
-                append(generateLogcatDump())
-            }
+    private const val LOGCAT_MAX_BYTES = 256 * 1024
+    private const val LOGCAT_READ_TIMEOUT_MS = 5_000L
+    private const val LOGCAT_EXIT_TIMEOUT_MS = 250L
+
+    fun generateDebugLog(
+        context: Context,
+        prefs: FlorisPreferenceModel? = null,
+        includeLogcat: Boolean = false,
+    ): String = buildString {
+        append(generateDebugLogHeader(context, prefs))
+        if (includeLogcat) {
+            appendLine()
+            append(generateLogcatDump())
         }
     }
 
@@ -64,31 +70,35 @@ object Devtools {
         }
     }
 
-    fun generateDebugLogForGithub(context: Context, prefs: FlorisPreferenceModel? = null, includeLogcat: Boolean = false): String {
-        return formatDebugLogForGithub(generateDebugLogHeader(context, prefs), if (includeLogcat) generateLogcatDump() else null)
+    fun generateDebugLogForGithub(
+        context: Context,
+        prefs: FlorisPreferenceModel? = null,
+        includeLogcat: Boolean = false,
+    ): String {
+        val header = generateDebugLogHeader(context, prefs)
+        val logcat = if (includeLogcat) generateLogcatDump() else null
+        return formatDebugLogForGithub(header, logcat)
     }
 
-    fun formatDebugLogForGithub(header: String, logcat: String?): String {
-        return buildString {
+    fun formatDebugLogForGithub(header: String, logcat: String?): String = buildString {
+        appendLine("<details>")
+        appendLine("<summary>Detailed info (Debug log header)</summary>")
+        appendLine()
+        appendLine("```")
+        append(header)
+        appendLine()
+        appendLine("```")
+        appendLine("</details>")
+        if (logcat != null) {
+            appendLine()
             appendLine("<details>")
-            appendLine("<summary>Detailed info (Debug log header)</summary>")
+            appendLine("<summary>Debug log content</summary>")
             appendLine()
             appendLine("```")
-            append(header)
+            append(logcat)
             appendLine()
             appendLine("```")
             appendLine("</details>")
-            if (logcat != null) {
-                appendLine()
-                appendLine("<details>")
-                appendLine("<summary>Debug log content</summary>")
-                appendLine()
-                appendLine("```")
-                append(logcat)
-                appendLine()
-                appendLine("```")
-                appendLine("</details>")
-            }
         }
     }
 
@@ -157,38 +167,44 @@ object Devtools {
         }
     }
 
-    fun generateLogcatDump(withTitle: Boolean = true): String {
-        return buildString {
-            if (withTitle) appendLine("======= LOGCAT =======")
-            try {
-                val process = ProcessBuilder("/system/bin/logcat", "-d", "-t", "2000")
-                    .redirectErrorStream(true).start()
-                append(collectLogcat(process))
-            } catch (e: IOException) {
-                appendLine("Failed to retrieve logcat: ${e.message}")
-            } catch (e: SecurityException) {
-                appendLine("Logcat access denied: ${e.message}")
-            }
+    fun generateLogcatDump(withTitle: Boolean = true): String = buildString {
+        if (withTitle) appendLine("======= LOGCAT =======")
+        try {
+            val process = ProcessBuilder("/system/bin/logcat", "-d", "-t", "2000")
+                .redirectErrorStream(true).start()
+            append(collectLogcat(process))
+        } catch (e: IOException) {
+            appendLine("Failed to retrieve logcat: ${e.message}")
+        } catch (e: SecurityException) {
+            appendLine("Logcat access denied: ${e.message}")
         }
     }
 
-    internal fun collectLogcat(process: Process, maxBytes: Int = 256 * 1024, timeoutMs: Long = 5_000): String {
+    internal fun collectLogcat(
+        process: Process,
+        maxBytes: Int = LOGCAT_MAX_BYTES,
+        timeoutMs: Long = LOGCAT_READ_TIMEOUT_MS,
+    ): String {
         val input = process.inputStream
         val reader = FutureTask { input.use { BoundedRead.read(it, maxBytes) } }
         Thread(reader, "humming-logcat").apply { isDaemon = true }.start()
-        try {
+        return try {
             val bytes = reader.get(timeoutMs, TimeUnit.MILLISECONDS)
             val text = String(bytes, 0, minOf(bytes.size, maxBytes), Charsets.UTF_8)
-            if (bytes.size > maxBytes) return "$text\n[Logcat truncated at $maxBytes bytes.]\n"
-            if (!process.waitFor(250, TimeUnit.MILLISECONDS)) return "$text\n[Logcat did not exit after closing its output.]\n"
-            return if (process.exitValue() == 0) text else "$text\n[Logcat failed with exit code ${process.exitValue()}.]\n"
+            when {
+                bytes.size > maxBytes -> "$text\n[Logcat truncated at $maxBytes bytes.]\n"
+                !process.waitFor(LOGCAT_EXIT_TIMEOUT_MS, TimeUnit.MILLISECONDS) ->
+                    "$text\n[Logcat did not exit after closing its output.]\n"
+                process.exitValue() != 0 -> "$text\n[Logcat failed with exit code ${process.exitValue()}.]\n"
+                else -> text
+            }
         } catch (_: TimeoutException) {
-            return "[Logcat collection timed out after $timeoutMs ms.]\n"
+            "[Logcat collection timed out after $timeoutMs ms.]\n"
         } catch (e: ExecutionException) {
-            return "[Failed to read logcat: ${e.cause?.message ?: e.message}]\n"
+            "[Failed to read logcat: ${e.cause?.message ?: e.message}]\n"
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
-            return "[Logcat collection interrupted.]\n"
+            "[Logcat collection interrupted.]\n"
         } finally {
             process.destroy()
             reader.cancel(true)

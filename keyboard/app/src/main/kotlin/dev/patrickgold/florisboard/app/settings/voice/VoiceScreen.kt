@@ -139,9 +139,12 @@ fun VoiceScreen() = FlorisScreen {
                         if (ready || ModelStore.bytesOnDisk(app, current) > 0) {
                             OutlinedButton(onClick = {
                                 if (!ModelStore.delete(app, current)) {
-                                    context.showShortToastSync("Model is in use or could not be deleted. Finish dictation and try again.")
+                                    context.showShortToastSync(
+                                        "Model is in use or could not be deleted. Finish dictation and try again.",
+                                    )
                                 }
-                                ModelDownloader.refresh(app); tick++
+                                ModelDownloader.refresh(app)
+                                tick++
                             }, enabled = !running) {
                                 Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
                                 Text("Delete (${VoiceModels.formatBytes(ModelStore.bytesOnDisk(app, current))})")

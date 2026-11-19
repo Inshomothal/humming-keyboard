@@ -36,13 +36,14 @@ class VoiceMemoryTest {
     @Test fun teardownWaitsForEveryLeaseAndDoesNotAcceptNewUsersWhilePending() {
         val u = UseCount()
         var closed = 0
-        u.acquire(); u.acquire()
+        u.acquire()
+        u.acquire()
         assertFalse(u.releaseWhenIdle { closed++ })
         assertTrue(u.releasePending)
         try {
             u.acquire()
             fail("must not acquire an engine awaiting teardown")
-        } catch (_: IllegalStateException) { }
+        } catch (_: IllegalStateException) {}
         u.release()
         assertEquals(0, closed)
         assertFalse(u.releaseWhenIdle { closed++ })
@@ -65,7 +66,9 @@ class VoiceMemoryTest {
             worker.execute {
                 started.countDown()
                 while (finish.count > 0) {
-                    try { finish.await() } catch (_: InterruptedException) { }
+                    try {
+                        finish.await()
+                    } catch (_: InterruptedException) {}
                 }
             }
             assertTrue(started.await(5, TimeUnit.SECONDS))

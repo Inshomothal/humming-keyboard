@@ -36,10 +36,18 @@ class ModelStoreTest {
     private val requests: MutableList<String?> = java.util.Collections.synchronizedList(mutableListOf())
 
     @Volatile private var honourRange = true
-    @Volatile private var bodyLimit: Int? = null
-    @Volatile private var omitLength = false
-    @Volatile private var contentRangeOverride: String? = null
-    @Volatile private var extraBytes = 0
+
+    @Volatile
+    private var bodyLimit: Int? = null
+
+    @Volatile
+    private var omitLength = false
+
+    @Volatile
+    private var contentRangeOverride: String? = null
+
+    @Volatile
+    private var extraBytes = 0
     private val archive = tarBz2(
         "test-model/model.int8.onnx" to ByteArray(4096) { (it % 251).toByte() },
         "test-model/tokens.txt" to "a 0\nb 1\n".toByteArray(),

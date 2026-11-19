@@ -55,11 +55,15 @@ class BoundedReadTest {
         val input = object : InputStream() {
             override fun read(): Int {
                 while (closed.count > 0) {
-                    try { closed.await() } catch (_: InterruptedException) { }
+                    try {
+                        closed.await()
+                    } catch (_: InterruptedException) {}
                 }
                 return -1
             }
-            override fun close() { closed.countDown() }
+            override fun close() {
+                closed.countDown()
+            }
         }
         val process = LogProcess(input)
         val text = Devtools.collectLogcat(process, timeoutMs = 50)

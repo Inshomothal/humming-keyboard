@@ -112,11 +112,11 @@ object ModelStore {
                 val code = conn.responseCode
                 if (code != 200 && code != 206) throw IOException("model download HTTP $code")
                 if (code == 206) {
-                    val range = Regex("bytes (\\d+)-(\\d+)/(\\d+)")
+                    val range = Regex("bytes (?<start>\\d+)-(?<end>\\d+)/(?<total>\\d+)")
                         .matchEntire(conn.getHeaderField("Content-Range") ?: "")
-                    val start = range?.groupValues?.get(1)?.toLongOrNull()
-                    val end = range?.groupValues?.get(2)?.toLongOrNull()
-                    val total = range?.groupValues?.get(3)?.toLongOrNull()
+                    val start = range?.groups?.get("start")?.value?.toLongOrNull()
+                    val end = range?.groups?.get("end")?.value?.toLongOrNull()
+                    val total = range?.groups?.get("total")?.value?.toLongOrNull()
                     if (start != done || end != m.downloadBytes - 1 || total != m.downloadBytes) {
                         part.delete()
                         throw IOException("invalid model download Content-Range; retrying from the beginning")
@@ -147,7 +147,10 @@ object ModelStore {
                                 out.write(buf, 0, n)
                                 done += n
                                 val pct = (done * 95 / m.downloadBytes).toInt().coerceAtMost(95)
-                                if (pct != lastPct) { lastPct = pct; progress(pct, done) }
+                                if (pct != lastPct) {
+                                    lastPct = pct
+                                    progress(pct, done)
+                                }
                             }
                         }
                     }

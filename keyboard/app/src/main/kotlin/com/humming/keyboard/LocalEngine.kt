@@ -131,9 +131,14 @@ object CoreLoader {
     @Synchronized
     private fun engine(ctx: Context, m: VoiceModel = ModelStore.current(ctx)): LocalEngine {
         val key = m.id
-        if (uses.releasePending) throw TranscriberUnavailable("the previous dictation is still finishing; try again shortly")
-        engine?.let { if (engineKey == key) return it }
-        if (!uses.idle) throw TranscriberUnavailable("finish the current dictation before changing voice models")
+        val cached = engine
+        if (!uses.releasePending && cached != null && engineKey == key) return cached
+        val unavailable = when {
+            uses.releasePending -> "the previous dictation is still finishing; try again shortly"
+            !uses.idle -> "finish the current dictation before changing voice models"
+            else -> null
+        }
+        if (unavailable != null) throw TranscriberUnavailable(unavailable)
         release()
         if (!ModelStore.ready(ctx, m)) throw TranscriberUnavailable("the speech model is not downloaded")
         val e = SherpaEngine(m, ModelStore.dir(ctx, m), threads())
@@ -201,7 +206,11 @@ class UseCount {
     val idle: Boolean get() = n == 0
     val count: Int get() = n
     val releasePending: Boolean get() = onIdle != null
-    fun acquire() { check(!releasePending); n++ }
+    fun acquire() {
+        check(!releasePending)
+        n++
+    }
+
     fun release() {
         if (n > 0) n--
         if (idle) {
@@ -211,7 +220,11 @@ class UseCount {
         }
     }
     fun releaseWhenIdle(action: () -> Unit): Boolean {
-        if (idle) action() else if (onIdle == null) onIdle = action
+        if (idle) {
+            action()
+        } else if (onIdle == null) {
+            onIdle = action
+        }
         return idle
     }
 }
