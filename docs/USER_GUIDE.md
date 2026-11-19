@@ -205,3 +205,9 @@ Still stuck? See [CONTRIBUTING.md](../CONTRIBUTING.md) for how to report a bug.
 Android's developer **Export debug log** screen collects one background snapshot for both copy formats.
 Logcat collection is limited to 2,000 recent entries and 256 KiB, with a five-second read timeout.
 Truncation, timeouts and collection failures are reported in the exported text.
+
+The Best and Multilingual archive pins in this test build were refreshed on 2026-11-19: both downloaded archives'
+SHA-256 hashes match the upstream GitHub release asset metadata
+([Best](https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/assets/719763786),
+[Multilingual](https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/assets/719769366)).
+The earlier 1.8.0 pins do not match those currently served archives.
