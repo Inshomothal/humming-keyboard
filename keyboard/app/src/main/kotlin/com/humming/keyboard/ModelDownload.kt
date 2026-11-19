@@ -80,11 +80,11 @@ object ModelStore {
 
     private fun archive(ctx: Context, m: VoiceModel) = File(root(ctx), "${m.id}.tar.bz2.part")
 
-    /** Removes a model (and any partial download). Dictation with it stays off until it is downloaded again. */
-    fun delete(ctx: Context, m: VoiceModel): Boolean {
-        CoreLoader.release()
+    /** Returns false without deleting files while an engine is in use; the caller can retry once it is idle. */
+    fun delete(ctx: Context, m: VoiceModel): Boolean = synchronized(CoreLoader) {
+        if (!CoreLoader.release()) return@synchronized false
         archive(ctx, m).delete()
-        return dir(ctx, m).deleteRecursively()
+        dir(ctx, m).deleteRecursively()
     }
 
     /** Whisper files from Humming M2-M4 builds are dead weight now. */
@@ -110,22 +110,52 @@ object ModelStore {
             if (done > 0) conn.setRequestProperty("Range", "bytes=$done-")
             try {
                 val code = conn.responseCode
-                if (code !in 200..299) throw IOException("model download HTTP $code")
+                if (code != 200 && code != 206) throw IOException("model download HTTP $code")
+                if (code == 206) {
+                    val range = Regex("bytes (\\d+)-(\\d+)/(\\d+)")
+                        .matchEntire(conn.getHeaderField("Content-Range") ?: "")
+                    val start = range?.groupValues?.get(1)?.toLongOrNull()
+                    val end = range?.groupValues?.get(2)?.toLongOrNull()
+                    val total = range?.groupValues?.get(3)?.toLongOrNull()
+                    if (start != done || end != m.downloadBytes - 1 || total != m.downloadBytes) {
+                        part.delete()
+                        throw IOException("invalid model download Content-Range; retrying from the beginning")
+                    }
+                }
                 val append = done > 0 && code == 206
                 if (!append) done = 0
+                val expected = m.downloadBytes - done
+                val lengthHeader = conn.getHeaderField("Content-Length")
+                val length = lengthHeader?.toLongOrNull()
+                if (lengthHeader != null && length != expected) {
+                    if (code == 206) part.delete()
+                    throw IOException("model download size mismatch: expected $expected bytes, server reported $length")
+                }
                 var lastPct = -1
-                conn.inputStream.use { input ->
-                    java.io.FileOutputStream(part, append).use { out ->
-                        val buf = ByteArray(256 * 1024)
-                        while (true) {
-                            val n = input.read(buf)
-                            if (n < 0) break
-                            out.write(buf, 0, n)
-                            done += n
-                            val pct = (done * 95 / m.downloadBytes).toInt().coerceAtMost(95)
-                            if (pct != lastPct) { lastPct = pct; progress(pct, done) }
+                var oversized = false
+                try {
+                    conn.inputStream.use { input ->
+                        java.io.FileOutputStream(part, append).use { out ->
+                            val buf = ByteArray(256 * 1024)
+                            while (true) {
+                                val n = input.read(buf)
+                                if (n < 0) break
+                                if (n > m.downloadBytes - done) {
+                                    oversized = true
+                                    throw IOException("model download exceeds expected size")
+                                }
+                                out.write(buf, 0, n)
+                                done += n
+                                val pct = (done * 95 / m.downloadBytes).toInt().coerceAtMost(95)
+                                if (pct != lastPct) { lastPct = pct; progress(pct, done) }
+                            }
                         }
                     }
+                } finally {
+                    if (oversized) part.delete()
+                }
+                if (done != m.downloadBytes) {
+                    throw IOException("incomplete model download: received $done of ${m.downloadBytes} bytes")
                 }
             } finally {
                 conn.disconnect()

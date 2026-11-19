@@ -258,11 +258,15 @@ object HummingVoice {
         Thread({
             runCatching {
                 if (!ModelStore.ready(app)) return@runCatching
-                val e = CoreLoader.engine(app)
-                if (!warmed) {
-                    warmed = true
-                    val w = synchronized(CoreLoader.lock) { e.warmup() }
-                    if (BuildConfig.DEBUG) Log.i(TAG, "HUMMING_WARM variant=${CoreLoader.variant} warmup=$w")
+                val e = CoreLoader.acquire(app)
+                try {
+                    if (!warmed) {
+                        val w = synchronized(CoreLoader.lock) { e.warmup() }
+                        warmed = true
+                        if (BuildConfig.DEBUG) Log.i(TAG, "HUMMING_WARM variant=${CoreLoader.variant} warmup=$w")
+                    }
+                } finally {
+                    CoreLoader.done()
                 }
             }
         }, "humming-warm").apply { priority = Thread.MIN_PRIORITY }.start()

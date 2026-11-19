@@ -66,6 +66,7 @@ import com.humming.keyboard.Prefs
 import com.humming.keyboard.VoiceModel
 import com.humming.keyboard.VoiceModels
 import dev.patrickgold.florisboard.lib.compose.FlorisScreen
+import org.florisboard.lib.android.showShortToastSync
 
 private val Ok = Color(0xFF1E9E5A)
 
@@ -137,7 +138,9 @@ fun VoiceScreen() = FlorisScreen {
                         }
                         if (ready || ModelStore.bytesOnDisk(app, current) > 0) {
                             OutlinedButton(onClick = {
-                                ModelStore.delete(app, current)
+                                if (!ModelStore.delete(app, current)) {
+                                    context.showShortToastSync("Model is in use or could not be deleted. Finish dictation and try again.")
+                                }
                                 ModelDownloader.refresh(app); tick++
                             }, enabled = !running) {
                                 Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))

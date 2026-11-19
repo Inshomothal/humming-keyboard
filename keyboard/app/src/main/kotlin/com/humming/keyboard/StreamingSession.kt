@@ -2,6 +2,7 @@ package com.humming.keyboard
 
 import android.content.Context
 import android.util.Log
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -42,7 +43,6 @@ class StreamingSession(
     private val english = VoiceModels.englishCleanup(ModelStore.current(app).id)
     @Volatile private var engine: LocalEngine? = null
     private val acquired = java.util.concurrent.atomic.AtomicBoolean(false)
-    @Volatile private var closed = false
 
     /** Hands the engine back once, so the model can be unloaded under memory pressure when no one dictates. */
     private fun releaseEngine() {
@@ -66,7 +66,6 @@ class StreamingSession(
                 if (!ModelStore.ready(app)) throw TranscriberUnavailable("the speech model is still downloading")
                 engine = CoreLoader.acquire(app)
                 acquired.set(true)
-                if (closed) releaseEngine()
             } catch (e: Throwable) {
                 error = e.message ?: e.javaClass.simpleName
             }
@@ -154,24 +153,31 @@ class StreamingSession(
     /** Blocking (call off the main thread): flushes the tail, waits for the transcriber, returns the final text. */
     fun finish(): Result {
         val t0 = System.nanoTime()
-        val before = segmenter.segmentsEmitted
-        segmenter.flush()
-        val tail = segmenter.segmentsEmitted > before
-        segmenter.release()
-        worker.shutdown()
-        worker.awaitTermination(600, TimeUnit.SECONDS)
-        val raw = synchronized(raws) { raws.joinToString(" ") }
-        val cmd = when {
-            raw.isBlank() -> VoiceCommands.Result("", null)
-            !english -> VoiceCommands.Result(cleanText(raw), null)
-            else -> VoiceCommands.apply(cleanText(raw))
+        try {
+            val before = segmenter.segmentsEmitted
+            try {
+                segmenter.flush()
+            } finally {
+                segmenter.release()
+            }
+            val tail = segmenter.segmentsEmitted > before
+            worker.shutdown()
+            if (!worker.awaitTermination(600, TimeUnit.SECONDS)) {
+                throw TranscriberUnavailable("speech recognition timed out; still waiting for the engine to finish")
+            }
+            val raw = synchronized(raws) { raws.joinToString(" ") }
+            val cmd = when {
+                raw.isBlank() -> VoiceCommands.Result("", null)
+                !english -> VoiceCommands.Result(cleanText(raw), null)
+                else -> VoiceCommands.apply(cleanText(raw))
+            }
+            val ms = (System.nanoTime() - t0) / 1_000_000
+            return Result(cmd.text, raw, segmenter.segmentsEmitted, ms, if (cmd.text.isBlank()) error else null,
+                if (tail) lastAudioMs else 0, if (tail) lastSttMs else 0, if (tail) lastTiming else "{}", cmd.instruction)
+        } finally {
+            worker.shutdown()
+            afterWorkerTermination(worker) { releaseEngine() }
         }
-        val text = cmd.text
-        closed = true
-        releaseEngine()
-        val ms = (System.nanoTime() - t0) / 1_000_000
-        return Result(text, raw, segmenter.segmentsEmitted, ms, if (text.isBlank()) error else null,
-            if (tail) lastAudioMs else 0, if (tail) lastSttMs else 0, if (tail) lastTiming else "{}", cmd.instruction)
     }
 
     private companion object {
@@ -181,12 +187,32 @@ class StreamingSession(
 
     /** Drops everything (keyboard hidden mid-dictation). */
     fun cancel() {
-        worker.shutdownNow()
-        segmenter.release()
-        closed = true
-        // Hand the engine back only once the transcriber thread has stopped touching it.
-        Thread({ runCatching { worker.awaitTermination(60, TimeUnit.SECONDS) }; releaseEngine() }, "humming-stt-release").start()
+        try {
+            segmenter.release()
+        } finally {
+            worker.shutdownNow()
+            afterWorkerTermination(worker) { releaseEngine() }
+        }
     }
+}
+
+/** Native inference may ignore interruption; its lease must outlive the worker, even after a timeout. */
+internal fun afterWorkerTermination(worker: ExecutorService, action: () -> Unit) {
+    if (worker.isTerminated) {
+        action()
+        return
+    }
+    Thread({
+        var interrupted = false
+        while (!worker.isTerminated) {
+            try {
+                worker.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)
+            } catch (_: InterruptedException) {
+                interrupted = true
+            }
+        }
+        try { action() } finally { if (interrupted) Thread.currentThread().interrupt() }
+    }, "humming-stt-release").apply { isDaemon = true }.start()
 }
 
 /** Where live audio is cut into phrases. */

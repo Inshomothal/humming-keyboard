@@ -42,7 +42,8 @@ import dev.patrickgold.florisboard.app.FlorisPreferenceStore
 import dev.patrickgold.florisboard.clipboardManager
 import dev.patrickgold.florisboard.lib.compose.FlorisScreen
 import dev.patrickgold.florisboard.lib.devtools.Devtools
-import org.florisboard.lib.android.showShortToast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.florisboard.lib.compose.FlorisButton
 import org.florisboard.lib.compose.florisHorizontalScroll
 import org.florisboard.lib.compose.florisScrollbar
@@ -63,8 +64,14 @@ fun ExportDebugLogScreen() = FlorisScreen {
     var formattedDebugLog by remember { mutableStateOf<List<String>?>(null) }
 
     LaunchedEffect(Unit) {
-        debugLog = Devtools.generateDebugLog(context, prefs, includeLogcat = true).lines()
-        formattedDebugLog = Devtools.generateDebugLogForGithub(context, prefs, includeLogcat = true).lines()
+        val logs = withContext(Dispatchers.IO) {
+            val header = runCatching { Devtools.generateDebugLogHeader(context, prefs) }
+                .getOrElse { "Failed to collect debug header: ${it.message}\n" }
+            val logcat = Devtools.generateLogcatDump()
+            Pair((header + "\n" + logcat).lines(), Devtools.formatDebugLogForGithub(header, logcat).lines())
+        }
+        debugLog = logs.first
+        formattedDebugLog = logs.second
     }
 
     bottomBar {
@@ -87,7 +94,7 @@ fun ExportDebugLogScreen() = FlorisScreen {
                     context.showShortToastSync(context.getString(R.string.devtools__debuglog__copied_to_clipboard))
                 },
                 text = stringRes(R.string.devtools__debuglog__copy_for_github),
-                enabled = debugLog != null,
+                enabled = formattedDebugLog != null,
             )
         }
     }

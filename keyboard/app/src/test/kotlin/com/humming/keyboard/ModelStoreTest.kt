@@ -36,6 +36,10 @@ class ModelStoreTest {
     private val requests: MutableList<String?> = java.util.Collections.synchronizedList(mutableListOf())
 
     @Volatile private var honourRange = true
+    @Volatile private var bodyLimit: Int? = null
+    @Volatile private var omitLength = false
+    @Volatile private var contentRangeOverride: String? = null
+    @Volatile private var extraBytes = 0
     private val archive = tarBz2(
         "test-model/model.int8.onnx" to ByteArray(4096) { (it % 251).toByte() },
         "test-model/tokens.txt" to "a 0\nb 1\n".toByteArray(),
@@ -67,14 +71,18 @@ class ModelStoreTest {
             ?.substringAfter(':')?.trim()
         requests += range
         val from = range?.takeIf { honourRange }?.removePrefix("bytes=")?.removeSuffix("-")?.toInt() ?: 0
-        val body = archive.copyOfRange(from, archive.size)
+        val body = archive.copyOfRange(from, archive.size) + ByteArray(extraBytes)
         val head = buildString {
             append(if (from > 0) "HTTP/1.1 206 Partial Content\r\n" else "HTTP/1.1 200 OK\r\n")
-            if (from > 0) append("Content-Range: bytes $from-${archive.size - 1}/${archive.size}\r\n")
-            append("Content-Length: ${body.size}\r\nConnection: close\r\n\r\n")
+            if (from > 0) {
+                val value = contentRangeOverride ?: "bytes $from-${archive.size - 1}/${archive.size}"
+                if (value.isNotEmpty()) append("Content-Range: $value\r\n")
+            }
+            if (!omitLength) append("Content-Length: ${body.size}\r\n")
+            append("Connection: close\r\n\r\n")
         }
         out.write(head.toByteArray(Charsets.ISO_8859_1))
-        out.write(body)
+        out.write(body, 0, minOf(body.size, bodyLimit ?: body.size))
         out.flush()
     }
 
@@ -125,6 +133,80 @@ class ModelStoreTest {
         ModelStore.download(ctx, m) { _, _ -> }
         assertEquals(listOf<String?>("bytes=100-"), requests)
         assertTrue(ModelStore.ready(ctx, m))
+    }
+
+    @Test fun prematureEofKeepsThePartialAndResumesInsteadOfReportingAChecksumFailure() {
+        val m = model()
+        bodyLimit = 100
+        omitLength = true
+        try {
+            ModelStore.download(ctx, m) { _, _ -> }
+            fail("expected an incomplete download")
+        } catch (e: IOException) {
+            assertTrue(e.message!!.contains("incomplete model download"))
+        }
+        assertEquals(100L, part(m).length())
+        assertFalse(ModelStore.ready(ctx, m))
+        bodyLimit = null
+        omitLength = false
+        ModelStore.download(ctx, m) { _, _ -> }
+        assertEquals(listOf(null, "bytes=100-"), requests)
+        assertTrue(ModelStore.ready(ctx, m))
+    }
+
+    @Test fun aDisconnectedFixedLengthResponseAlsoKeepsItsPartial() {
+        val m = model()
+        bodyLimit = 100
+        try {
+            ModelStore.download(ctx, m) { _, _ -> }
+            fail("expected a disconnected download")
+        } catch (e: IOException) {
+            assertFalse(e.message == "model checksum mismatch")
+        }
+        assertEquals(100L, part(m).length())
+        assertFalse(ModelStore.ready(ctx, m))
+    }
+
+    @Test fun oversizedResponsesAreRejectedAndDiscardedBeforeVerification() {
+        val m = model()
+        omitLength = true
+        extraBytes = 1
+        try {
+            ModelStore.download(ctx, m) { _, _ -> }
+            fail("expected an oversized download")
+        } catch (e: IOException) {
+            assertEquals("model download exceeds expected size", e.message)
+        }
+        assertFalse(part(m).exists())
+        assertFalse(ModelStore.ready(ctx, m))
+    }
+
+    @Test fun malformedResumeRangesAreDiscardedAndTheNextAttemptStartsClean() {
+        val m = model()
+        for (bad in listOf(
+            "",
+            "bytes 0-${archive.size - 1}/${archive.size}",
+            "bytes 100-${archive.size - 2}/${archive.size}",
+            "bytes 100-${archive.size - 1}/${archive.size + 1}",
+            "bytes 100-${archive.size - 1}/*",
+        )) {
+            ModelStore.root(ctx).mkdirs()
+            part(m).writeBytes(archive.copyOfRange(0, 100))
+            contentRangeOverride = bad
+            try {
+                ModelStore.download(ctx, m) { _, _ -> }
+                fail("expected an invalid Content-Range: $bad")
+            } catch (e: IOException) {
+                assertTrue(e.message!!.contains("invalid model download Content-Range"))
+            }
+            assertFalse(part(m).exists())
+            assertFalse(ModelStore.ready(ctx, m))
+            contentRangeOverride = null
+            ModelStore.download(ctx, m) { _, _ -> }
+            assertEquals(null, requests.last())
+            assertTrue(ModelStore.ready(ctx, m))
+            ModelStore.delete(ctx, m)
+        }
     }
 
     @Test fun aServerThatIgnoresRangeRestartsFromTheBeginning() {

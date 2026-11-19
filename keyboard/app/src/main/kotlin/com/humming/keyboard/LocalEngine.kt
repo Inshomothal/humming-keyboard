@@ -129,11 +129,13 @@ object CoreLoader {
 
     /** Loads the model once (about a second) and keeps it; reloads only when the model changes. */
     @Synchronized
-    fun engine(ctx: Context, m: VoiceModel = ModelStore.current(ctx)): LocalEngine {
+    private fun engine(ctx: Context, m: VoiceModel = ModelStore.current(ctx)): LocalEngine {
         val key = m.id
+        if (uses.releasePending) throw TranscriberUnavailable("the previous dictation is still finishing; try again shortly")
         engine?.let { if (engineKey == key) return it }
-        synchronized(lock) { engine?.close() }
-        engine = null
+        if (!uses.idle) throw TranscriberUnavailable("finish the current dictation before changing voice models")
+        release()
+        if (!ModelStore.ready(ctx, m)) throw TranscriberUnavailable("the speech model is not downloaded")
         val e = SherpaEngine(m, ModelStore.dir(ctx, m), threads())
         android.util.Log.i("HUMMING", "HUMMING_ENGINE loaded ${m.id} load_ms=${e.loadMs} threads=${threads()}")
         engine = e
@@ -181,20 +183,35 @@ object CoreLoader {
     /** Held around every native engine call so two dictations never run the engine at once. */
     val lock = Any()
 
+    /** Requests teardown without waiting for inference. False means it is deferred until the last lease ends. */
     @Synchronized
-    fun release() {
-        synchronized(lock) { engine?.close() }
+    fun release(): Boolean = uses.releaseWhenIdle {
+        val retired = engine
         engine = null
         engineKey = null
         variant = "none"
+        retired?.close()
     }
 }
 
-/** A use counter that never goes below zero. */
+/** A use counter with deferred teardown. The owner serializes access; pending teardown refuses new leases. */
 class UseCount {
     private var n = 0
+    private var onIdle: (() -> Unit)? = null
     val idle: Boolean get() = n == 0
     val count: Int get() = n
-    fun acquire() { n++ }
-    fun release() { if (n > 0) n-- }
+    val releasePending: Boolean get() = onIdle != null
+    fun acquire() { check(!releasePending); n++ }
+    fun release() {
+        if (n > 0) n--
+        if (idle) {
+            val action = onIdle
+            onIdle = null
+            action?.invoke()
+        }
+    }
+    fun releaseWhenIdle(action: () -> Unit): Boolean {
+        if (idle) action() else if (onIdle == null) onIdle = action
+        return idle
+    }
 }

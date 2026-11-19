@@ -187,7 +187,8 @@ Moving from 1.5.0 to 1.6.0 needs one manual install, because 1.5.0 has no update
 | Problem | What to do |
 |---|---|
 | "Voice isn't available on this device" (Android) | The on-device engine is built for 64-bit ARM (`arm64-v8a`) and x86_64 only; this phone's CPU is not one of them. From 1.6.3 (release candidate, not yet published) Humming says so instead of typing placeholder text; earlier versions could type a "[mock]" placeholder on such phones. |
-| The speech model does not download | With **Download on Wi-Fi only** on, the download waits for Wi-Fi. Check the connection, or turn the option off in Settings > Voice. |
+| The speech model does not download | With **Download on Wi-Fi only** on, the download waits for Wi-Fi. Check the connection, or turn the option off in Settings > Voice. Interrupted downloads keep their partial data for resuming; an invalid resume response restarts the download. SHA-256 verification is still required before installation. |
+| A voice model cannot be changed or deleted while dictation is finishing | Wait for recognition to finish, then retry. An active recognizer is not freed or its model files deleted mid-dictation. |
 | The mic does nothing / no permission prompt | Allow the microphone for Humming in Android's app settings, then tap the mic again. |
 | The Gboard option is missing on long-press | It only appears when Gboard is installed and enabled as a keyboard. |
 | An update is downloaded but not installed (Android) | Android needs you to allow Humming to install apps and to confirm the update with one tap. |
@@ -200,3 +201,7 @@ Moving from 1.5.0 to 1.6.0 needs one manual install, because 1.5.0 has no update
 | iPhone: dictation refuses to start | Install the on-device English model: **Settings > General > Keyboard > Dictation Languages > English**. Humming does not fall back to Apple's servers. |
 
 Still stuck? See [CONTRIBUTING.md](../CONTRIBUTING.md) for how to report a bug.
+
+Android's developer **Export debug log** screen collects one background snapshot for both copy formats.
+Logcat collection is limited to 2,000 recent entries and 256 KiB, with a five-second read timeout.
+Truncation, timeouts and collection failures are reported in the exported text.
