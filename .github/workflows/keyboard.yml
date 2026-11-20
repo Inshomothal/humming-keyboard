@@ -32,10 +32,10 @@ jobs:
       - name: Restore gradlew exec bit (web upload drops file mode)
         working-directory: keyboard
         run: chmod +x gradlew
-      - name: Unit tests (with coverage) + debug APK
+      - name: Unit tests (with coverage) + debug and instrumentation APKs
         working-directory: keyboard
         # app module tests: upstream v0.5.2 lib:snygg tests reference a missing package and do not compile
-        run: ./gradlew --no-daemon :app:createDebugUnitTestCoverageReport :app:assembleDebug
+        run: ./gradlew --no-daemon :app:createDebugUnitTestCoverageReport :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Line coverage (JaCoCo)
         run: |
           set -euo pipefail
@@ -61,6 +61,7 @@ jobs:
           name: keyboard-apk
           path: |
             keyboard/app/build/outputs/apk/debug/
+            keyboard/app/build/outputs/apk/androidTest/debug/
             keyboard/app/build/reports/tests/
             keyboard/app/build/reports/coverage/
             coverage/

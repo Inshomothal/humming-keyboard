@@ -34,7 +34,7 @@ object VoiceEdit {
     data class Result(val command: Command, val outcome: Outcome?)
 
     private const val MAX_WORDS = 14
-    private const val F = Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE or Pattern.UNICODE_CHARACTER_CLASS
+    private const val F = Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE
     private val LEAD = Pattern.compile("^(?:(?:um+|uh+|okay|ok|so|please|hey humming|humming)[,\\s]+)+", F)
     private val TRAIL = Pattern.compile("(?:[,\\s]+please)?[\\s.!?,]*$", F)
     private val RE_REPLACE = Pattern.compile(
